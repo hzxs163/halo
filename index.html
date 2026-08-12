@@ -3464,13 +3464,14 @@ const KUWO_API_LIST = [
 ];
 
 // ============================================================
-// 酷我搜索 - 直接调用 oiapi.net
+// 酷我搜索 - 支持列表和单曲两种返回格式
 // ============================================================
 
 async function searchKuwo(kw, limit) {
   let added = 0;
   
   try {
+    // 请求时指定返回数量，让接口返回数组
     const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(kw)}&n=${limit || 10}&br=1`;
     const res = await fetch(url);
     const json = await res.json();
@@ -3480,27 +3481,53 @@ async function searchKuwo(kw, limit) {
       return 0;
     }
     
-    const data = json.data;
-    if (!data || !data.song) {
+    // 关键修复：判断 data 是数组还是对象
+    let songList = [];
+    if (Array.isArray(json.data)) {
+      // 情况1：返回的是数组（多个结果）
+      songList = json.data;
+    } else if (json.data && json.data.song) {
+      // 情况2：返回的是单个对象（1个结果），包装成数组
+      songList = [json.data];
+    } else {
       return 0;
     }
     
-    const uid = `kuwo-${data.rid || kw}`;
-    if (!state.trackMap.has(uid)) {
+    // 遍历歌曲列表
+    songList.forEach((data, idx) => {
+      const uid = `kuwo-${data.rid || kw}-${idx}`;
+      if (state.trackMap.has(uid)) return;
+      
+      // 提取最高音质（flac > 320k > 128k）
+      let bestQuality = '128k';
+      let bestUrl = null;
+      if (data.types && Array.isArray(data.types)) {
+        // 按码率从高到低排序
+        const sorted = [...data.types].sort((a, b) => {
+          const aVal = parseInt(a.bitrate) || 0;
+          const bVal = parseInt(b.bitrate) || 0;
+          return bVal - aVal;
+        });
+        if (sorted.length > 0) {
+          bestQuality = sorted[0].bitrate + 'k';
+          // 注意：types 里没有 url，url 在 data.url 中
+        }
+      }
+      
       const track = {
         uid,
         source: 'kuwo',
-        displayIndex: 1,
+        displayIndex: idx + 1,
         keyword: kw,
-        songid: data.rid || kw,
+        songid: data.rid || `${kw}-${idx}`,
         title: data.song || '未知歌曲',
         artist: data.singer || '未知歌手',
         album: data.album || '',
         cover: data.picture || null,
-        audioUrl: data.url || null,
+        audioUrl: data.url || null,  // 列表接口也可能直接返回 url
         lrc: null,
         lrcUrl: null,
-        detailsLoaded: true,
+        detailsLoaded: !!data.url,  // 如果有 url 则标记为已加载
         quality: 'flac',
         qualityLabel: 'FLAC',
         _fullData: data
@@ -3509,7 +3536,7 @@ async function searchKuwo(kw, limit) {
       state.trackMap.set(uid, track);
       state.searchResults.push(track);
       added++;
-    }
+    });
     
   } catch (e) {
     console.error('酷我搜索失败:', e);
@@ -3519,7 +3546,7 @@ async function searchKuwo(kw, limit) {
 }
 
 // ============================================================
-// 酷我获取播放链接
+// 酷我获取播放链接（保持不变，但增加对列表数据的支持）
 // ============================================================
 
 async function fetchKuwoDetails(track) {
@@ -3537,7 +3564,26 @@ async function fetchKuwoDetails(track) {
     return;
   }
   
+  // 如果 _fullData 中没有 url，尝试用 rid 重新请求单曲
   try {
+    const rid = track.songid;
+    if (rid) {
+      // 请求单曲详情，此时 n=1 返回单个对象
+      const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(rid)}&n=1&br=1`;
+      const res = await fetch(url);
+      const json = await res.json();
+      if (json.code === 1 && json.data && json.data.url) {
+        track.audioUrl = json.data.url;
+        track.detailsLoaded = true;
+        const q = inferQualityFromUrl(track.audioUrl);
+        track.quality = q.tag;
+        track.qualityLabel = q.label;
+        track._fullData = json.data;
+        return;
+      }
+    }
+    
+    // 备用方案：用歌名+歌手搜索
     const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(track.title + ' ' + track.artist)}&n=1&br=1`;
     const res = await fetch(url);
     const json = await res.json();
