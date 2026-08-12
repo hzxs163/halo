@@ -3387,53 +3387,161 @@ async function loadAuthSession(){
     return added;
     }
 
+// ============================================================
+// 新版酷我音乐搜索 - 多源自动回退
+// ============================================================
+
+// 酷我 API 列表（按优先级排序）
+const KUWO_API_LIST = [
+  // 源1：溯音酷我 API（不需要代理，直接调用）
+  {
+    name: '溯音酷我',
+    url: 'https://oiapi.net/api/Kuwo',
+    search: async (keyword, limit) => {
+      const res = await fetch(`${KUWO_API_LIST[0].url}?msg=${encodeURIComponent(keyword)}&n=${limit || 10}&br=1`);
+      const data = await res.json();
+      if (data?.data?.list && Array.isArray(data.data.list)) {
+        return data.data.list.map((item, idx) => ({
+          rid: item.id || item.rid || `${keyword}-${idx}`,
+          name: item.name || item.title || '',
+          artist: item.artist || item.singer || '',
+          album: item.album || '',
+          pic: item.pic || item.cover || ''
+        }));
+      }
+      // 尝试从 message 中解析
+      if (data?.message) {
+        const match = String(data.message).match(/歌曲信息[：:]\s*(.+?)\s*[-–]\s*(.+)/);
+        if (match) {
+          return [{
+            rid: keyword + '-0',
+            name: match[1].trim(),
+            artist: match[2].trim(),
+            album: '',
+            pic: ''
+          }];
+        }
+      }
+      return [];
+    },
+    getUrl: async (songId, songName, artist) => {
+      // 用歌名+歌手搜索获取播放链接
+      const keyword = songName && artist ? `${songName} ${artist}` : songName || songId;
+      const res = await fetch(`${KUWO_API_LIST[0].url}?msg=${encodeURIComponent(keyword)}&n=1&br=1`);
+      const data = await res.json();
+      if (data?.data?.url) return data.data.url;
+      if (data?.message) {
+        const match = String(data.message).match(/音乐链接[：:](\S+)/);
+        if (match) return match[1];
+      }
+      return null;
+    }
+  },
+  // 源2：通过您的代理调用星海 API
+  {
+    name: '星海酷我',
+    url: '/api/proxy/xinghai',
+    search: async (keyword, limit) => {
+      const res = await fetch(`/api/proxy/xinghai?source=kuwo&keyword=${encodeURIComponent(keyword)}&limit=${limit || 10}`);
+      const data = await res.json();
+      if (data?.list && Array.isArray(data.list)) {
+        return data.list.map((item, idx) => ({
+          rid: item.id || item.songid || `${keyword}-${idx}`,
+          name: item.name || item.title || '',
+          artist: item.artist || item.singer || '',
+          album: item.album || '',
+          pic: item.pic || item.cover || ''
+        }));
+      }
+      return [];
+    },
+    getUrl: async (songId) => {
+      const res = await fetch(`/api/proxy/xinghai?source=kuwo&id=${encodeURIComponent(songId)}&type=url`);
+      const data = await res.json();
+      return data?.url || null;
+    }
+  }
+];
+
+// 替换原有的 searchKuwo 函数
 async function searchKuwo(kw, limit){
-  // 改为调用您自己的代理接口
-  const url = `/api/proxy/kuwo?name=${encodeURIComponent(kw)}&page=1&limit=${encodeURIComponent(limit)}`;
   let added = 0;
   
-  try{
-    const res = await fetch(url);
-    const json = await res.json();
-    
-    // 兼容代理返回的格式
-    if (!json || typeof json !== 'object') return 0;
-    
-    // 检查数据是否存在
-    const data = Array.isArray(json.data) ? json.data : [];
-    if (json.code !== 200 || !data.length) return 0;
-
-    data.forEach((it, idx) => {
-      const uid = `kuwo-${it.rid}`;
-      if (state.trackMap.has(uid)) return;
-
-      const track = {
-        uid,
-        source: 'kuwo',
-        displayIndex: idx + 1,
-        keyword: kw,
-        songid: it.rid,
-        title: it.name || '',
-        artist: it.artist || '',
-        album: it.album || '',
-        cover: it.pic || null,
-        audioUrl: null,
-        lrc: null,
-        lrcUrl: null,
-        detailsLoaded: false,
-        quality: null,
-        qualityLabel: null
-      };
-
-      state.trackMap.set(uid, track);
-      state.searchResults.push(track);
-      added++;
-    });
-
-  } catch(e){
-    console.error('kuwo search via proxy', e);
+  // 遍历所有酷我 API，尝试搜索
+  for (const api of KUWO_API_LIST) {
+    try {
+      const results = await api.search(kw, limit);
+      if (!results || !results.length) continue;
+      
+      // 处理搜索结果
+      results.forEach((it, idx) => {
+        const uid = `kuwo-${it.rid || idx}`;
+        if (state.trackMap.has(uid)) return;
+        
+        const track = {
+          uid,
+          source: 'kuwo',
+          displayIndex: idx + 1,
+          keyword: kw,
+          songid: it.rid || `${kw}-${idx}`,
+          title: it.name || '未知歌曲',
+          artist: it.artist || '未知歌手',
+          album: it.album || '',
+          cover: it.pic || null,
+          audioUrl: null,
+          lrc: null,
+          lrcUrl: null,
+          detailsLoaded: false,
+          quality: null,
+          qualityLabel: null,
+          _apiRef: api  // 记录是哪个 API 搜到的，用于后续获取播放链接
+        };
+        
+        state.trackMap.set(uid, track);
+        state.searchResults.push(track);
+        added++;
+      });
+      
+      // 如果搜到了结果，就不再尝试后续 API
+      if (added > 0) break;
+      
+    } catch (e) {
+      console.warn(`酷我搜索 [${api.name}] 失败:`, e.message);
+      // 继续尝试下一个 API
+    }
   }
+  
   return added;
+}
+
+// 替换原有的 fetchKuwoDetails 函数
+async function fetchKuwoDetails(track) {
+  if (track.detailsLoaded && track.audioUrl) return;
+  
+  // 优先使用搜索时记录的 _apiRef
+  const apiList = track._apiRef ? [track._apiRef, ...KUWO_API_LIST] : KUWO_API_LIST;
+  
+  for (const api of apiList) {
+    try {
+      if (!api.getUrl) continue;
+      const url = await api.getUrl(track.songid, track.title, track.artist);
+      if (url) {
+        track.audioUrl = url;
+        track.detailsLoaded = true;
+        // 音质判断
+        const q = inferQualityFromUrl(url);
+        track.quality = q.tag;
+        track.qualityLabel = q.label;
+        return;
+      }
+    } catch (e) {
+      console.warn(`酷我获取URL [${api.name}] 失败:`, e.message);
+    }
+  }
+  
+  // 所有 API 都失败，但不抛出错误，让播放器显示"无法播放"
+  track.detailsLoaded = true;
+  console.warn('所有酷我音源均无法获取播放链接');
 }
 
     const JOOX_TOKEN = 'f84ao9lMF_q7husBWRfgUw';
