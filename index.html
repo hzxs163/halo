@@ -24,7 +24,7 @@
       --text-sub: #a1a6d0;
       --border-subtle: rgba(255, 255, 255, 0.12);
     }
-
+credentials:'include'
     * {
       box-sizing: border-box;
       -webkit-tap-highlight-color: transparent;
@@ -2678,7 +2678,7 @@ async function loadAuthSession(){
       try{
         const response=await fetch(registerMode?'/api/register':'/api/login',{
           method:'POST',
-          credentials:'same-origin',
+          credentials:'include',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify({username,password})
         });
@@ -2697,7 +2697,7 @@ async function loadAuthSession(){
     async function toggleAuth(){
       if(!state.isAuthenticated){openLoginModal();return;}
       await librarySaveChain;
-      try{await fetch('/api/logout',{method:'POST',credentials:'same-origin'});}catch(e){}
+      try{await fetch('/api/logout',{method:'POST',credentials:'include'});}catch(e){}
       dom.audio.pause();
       state.isAuthenticated=false;
       state.profileName='';
@@ -2838,7 +2838,7 @@ async function loadAuthSession(){
         if(!state.isAuthenticated || state.profileName!==username)return;
         const response=await fetch('/api/library',{
           method:'PUT',
-          credentials:'same-origin',
+          credentials:'include',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify(snapshot)
         });
@@ -3183,7 +3183,7 @@ async function loadAuthSession(){
       try{
         const response=await fetch('/api/import-playlist',{
           method:'POST',
-          credentials:'same-origin',
+          credentials:'include',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify({url})
         });
