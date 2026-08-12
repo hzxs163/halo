@@ -3386,7 +3386,102 @@ async function loadAuthSession(){
 
     return added;
     }
+    const JOOX_TOKEN = 'f84ao9lMF_q7husBWRfgUw';
+    const JOOX_BR = 4;
 
+    async function searchJoox(kw, limit){
+      const url=`https://apicx.asia/api/joox_music?msg=${encodeURIComponent(kw)}&token=${encodeURIComponent(JOOX_TOKEN)}&br=${encodeURIComponent(JOOX_BR)}`;
+      let added=0;
+      try{
+        const res=await fetch(url);
+        const json=await res.json();
+        const songs=json && json.code===200 && json.data && Array.isArray(json.data.songs) ? json.data.songs : [];
+        songs.slice(0, limit || songs.length).forEach((it, idx)=>{
+          const songMid=it.songmid || '';
+          const songId=it['歌曲ID'] || songMid || (idx+1);
+          const uid=`joox-${songMid || songId}`;
+          if(state.trackMap.has(uid))return;
+
+          const track={
+            uid,
+            source:'joox',
+            displayIndex:idx+1,
+            keyword:kw,
+            jooxIndex:idx+1,
+            songid:songId,
+            songMid:songMid,
+
+            title:it['歌曲名称']||'',
+            artist:it['歌手']||'',
+            album:it['专辑']||'',
+
+            cover:null,
+            audioUrl:null,
+            lrc:it['歌词内容']||null,
+            lrcUrl:null,
+            detailsLoaded:false,
+            quality:null,
+            qualityLabel:null
+          };
+
+          state.trackMap.set(uid,track);
+          state.searchResults.push(track);
+          added++;
+        });
+      }catch(e){
+        console.error('joox search',e);
+      }
+      return added;
+    }
+
+    async function searchAllSources(reset){
+      if(!state.searchKeyword){showToast(t('toastNeedKeyword'));return;}
+      const enabled=Object.keys(state.enabledSources).filter(k=>state.enabledSources[k]);
+      if(!enabled.length){showToast(t('searchStatusNoSource'));return;}
+      state.searchInProgress=true;
+      dom.searchStatus.textContent=t('searchStatusSearching');
+
+      if(reset){
+        Object.keys(state.perSourceCurrentLimit)
+          .forEach(k=>state.perSourceCurrentLimit[k]=state.perSourceLimit);
+        Object.keys(state.perSourcePage).forEach(k=>state.perSourcePage[k]=1);
+
+        state.searchResults=[];
+        state.trackMap.clear();
+        state.noMoreResults=false;
+      }
+
+      const kw=state.searchKeyword;
+      const tasks=[];
+      for(const s of enabled){
+        const limit=state.perSourceCurrentLimit[s]||state.perSourceLimit;
+        if(s==='netease')tasks.push(searchNetease(kw, state.perSourcePage.netease || 1, state.perSourceLimit));
+        if(s==='qq')tasks.push(searchQQ(kw,limit));
+        if(s==='kuwo')tasks.push(searchKuwo(kw,limit));
+        if(s==='joox')tasks.push(searchJoox(kw,limit));
+      }
+      let added=0;
+      try{
+        const res=await Promise.all(tasks);
+        added=res.reduce((a,b)=>a+(b||0),0);
+      }catch(e){
+        console.error(e);
+        showToast(t('toastSearchError'));
+      }
+
+      state.searchInProgress=false;
+      dom.searchStatus.textContent=t('searchStatusDone');
+      dom.searchCount.textContent=state.searchResults.length.toString();
+      renderMiniSearchList();
+      renderPlaylistList();
+      if(state.isAuthenticated&&!state.currentTrack && state.searchResults.length){
+        playFromList('results',0);
+      }
+      if(!reset){
+        if(added===0){state.noMoreResults=true;showToast(t('toastNoMore'));}
+        else state.noMoreResults=false;
+      }
+    }
 // ============================================================
 // 酷我获取播放链接
 // ============================================================
@@ -3496,15 +3591,7 @@ async function fetchJooxDetails(track) {
 // 确保歌曲详情加载
 // ============================================================
 
-async function ensureTrackDetails(track, options = {}) {
-  if (track.detailsLoaded && track.audioUrl && (track.lrc || !track.lrcUrl)) return;
-  if (!options.silent) dom.playerStatus.textContent = t('playerStatusLoading');
-  if (track.source === 'netease') await fetchNeteaseDetails(track);
-  else if (track.source === 'qishui') await fetchQishuiDetails(track);
-  else if (track.source === 'kuwo') await fetchKuwoDetails(track);
-  else if (track.source === 'joox') await fetchJooxDetails(track);
-  else await fetchQQDetails(track);
-}
+
 
     async function ensureTrackDetails(track, options = {}) {
       if (track.detailsLoaded && track.audioUrl && (track.lrc || !track.lrcUrl)) return;
@@ -3516,15 +3603,6 @@ async function ensureTrackDetails(track, options = {}) {
       else await fetchQQDetails(track);
     }
 
-    async function ensureTrackDetails(track, options={}){
-      if(track.detailsLoaded && track.audioUrl && (track.lrc || !track.lrcUrl)) return;
-      if(!options.silent)dom.playerStatus.textContent=t('playerStatusLoading');
-      if(track.source==='netease') await fetchNeteaseDetails(track);
-      else if(track.source==='qishui') await fetchQishuiDetails(track);
-      else if(track.source==='kuwo') await fetchKuwoDetails(track);
-      else if(track.source==='joox') await fetchJooxDetails(track);
-      else await fetchQQDetails(track);
-    }
 
     function parseLRC(txt){
       if(!txt)return[];
