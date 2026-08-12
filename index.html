@@ -3463,85 +3463,98 @@ const KUWO_API_LIST = [
   }
 ];
 
-// 替换原有的 searchKuwo 函数
-async function searchKuwo(kw, limit){
+// ============================================================
+// 酷我搜索 - 直接调用 oiapi.net
+// ============================================================
+
+async function searchKuwo(kw, limit) {
   let added = 0;
   
-  // 遍历所有酷我 API，尝试搜索
-  for (const api of KUWO_API_LIST) {
-    try {
-      const results = await api.search(kw, limit);
-      if (!results || !results.length) continue;
-      
-      // 处理搜索结果
-      results.forEach((it, idx) => {
-        const uid = `kuwo-${it.rid || idx}`;
-        if (state.trackMap.has(uid)) return;
-        
-        const track = {
-          uid,
-          source: 'kuwo',
-          displayIndex: idx + 1,
-          keyword: kw,
-          songid: it.rid || `${kw}-${idx}`,
-          title: it.name || '未知歌曲',
-          artist: it.artist || '未知歌手',
-          album: it.album || '',
-          cover: it.pic || null,
-          audioUrl: null,
-          lrc: null,
-          lrcUrl: null,
-          detailsLoaded: false,
-          quality: null,
-          qualityLabel: null,
-          _apiRef: api  // 记录是哪个 API 搜到的，用于后续获取播放链接
-        };
-        
-        state.trackMap.set(uid, track);
-        state.searchResults.push(track);
-        added++;
-      });
-      
-      // 如果搜到了结果，就不再尝试后续 API
-      if (added > 0) break;
-      
-    } catch (e) {
-      console.warn(`酷我搜索 [${api.name}] 失败:`, e.message);
-      // 继续尝试下一个 API
+  try {
+    const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(kw)}&n=${limit || 10}&br=1`;
+    const res = await fetch(url);
+    const json = await res.json();
+    
+    if (json.code !== 1) {
+      console.warn('酷我 API 返回错误:', json.message);
+      return 0;
     }
+    
+    const data = json.data;
+    if (!data || !data.song) {
+      return 0;
+    }
+    
+    const uid = `kuwo-${data.rid || kw}`;
+    if (!state.trackMap.has(uid)) {
+      const track = {
+        uid,
+        source: 'kuwo',
+        displayIndex: 1,
+        keyword: kw,
+        songid: data.rid || kw,
+        title: data.song || '未知歌曲',
+        artist: data.singer || '未知歌手',
+        album: data.album || '',
+        cover: data.picture || null,
+        audioUrl: data.url || null,
+        lrc: null,
+        lrcUrl: null,
+        detailsLoaded: true,
+        quality: 'flac',
+        qualityLabel: 'FLAC',
+        _fullData: data
+      };
+      
+      state.trackMap.set(uid, track);
+      state.searchResults.push(track);
+      added++;
+    }
+    
+  } catch (e) {
+    console.error('酷我搜索失败:', e);
   }
   
   return added;
 }
 
-// 替换原有的 fetchKuwoDetails 函数
+// ============================================================
+// 酷我获取播放链接
+// ============================================================
+
 async function fetchKuwoDetails(track) {
-  if (track.detailsLoaded && track.audioUrl) return;
-  
-  // 优先使用搜索时记录的 _apiRef
-  const apiList = track._apiRef ? [track._apiRef, ...KUWO_API_LIST] : KUWO_API_LIST;
-  
-  for (const api of apiList) {
-    try {
-      if (!api.getUrl) continue;
-      const url = await api.getUrl(track.songid, track.title, track.artist);
-      if (url) {
-        track.audioUrl = url;
-        track.detailsLoaded = true;
-        // 音质判断
-        const q = inferQualityFromUrl(url);
-        track.quality = q.tag;
-        track.qualityLabel = q.label;
-        return;
-      }
-    } catch (e) {
-      console.warn(`酷我获取URL [${api.name}] 失败:`, e.message);
-    }
+  if (track.audioUrl) {
+    track.detailsLoaded = true;
+    return;
   }
   
-  // 所有 API 都失败，但不抛出错误，让播放器显示"无法播放"
-  track.detailsLoaded = true;
-  console.warn('所有酷我音源均无法获取播放链接');
+  if (track._fullData && track._fullData.url) {
+    track.audioUrl = track._fullData.url;
+    track.detailsLoaded = true;
+    const q = inferQualityFromUrl(track.audioUrl);
+    track.quality = q.tag;
+    track.qualityLabel = q.label;
+    return;
+  }
+  
+  try {
+    const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(track.title + ' ' + track.artist)}&n=1&br=1`;
+    const res = await fetch(url);
+    const json = await res.json();
+    if (json.code === 1 && json.data && json.data.url) {
+      track.audioUrl = json.data.url;
+      track.detailsLoaded = true;
+      const q = inferQualityFromUrl(track.audioUrl);
+      track.quality = q.tag;
+      track.qualityLabel = q.label;
+      track._fullData = json.data;
+    } else {
+      throw new Error('无法获取播放链接');
+    }
+  } catch (e) {
+    console.warn('酷我获取URL失败:', e.message);
+    track.detailsLoaded = true;
+  }
 }
 
     const JOOX_TOKEN = 'f84ao9lMF_q7husBWRfgUw';
