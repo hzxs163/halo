@@ -3851,11 +3851,42 @@ async function fetchKuwoDetails(track) {
       await fetchQQDetails(track);
     }
 
-    async function fetchKuwoDetails(track){
-      const api=`https://kw-api.cenguigui.cn/?id=${encodeURIComponent(track.songid)}&type=song&level=zp&format=json`;
-      const res=await fetch(api);
-      const j=await res.json();
-      if(!j || j.code!==200 || !j.data) throw new Error('kuwo kw-api detail failed');
+async function fetchKuwoDetails(track) {
+  if (track.audioUrl) {
+    track.detailsLoaded = true;
+    return;
+  }
+  
+  if (track._fullData && track._fullData.url) {
+    track.audioUrl = track._fullData.url;
+    track.detailsLoaded = true;
+    const q = inferQualityFromUrl(track.audioUrl);
+    track.quality = q.tag;
+    track.qualityLabel = q.label;
+    return;
+  }
+  
+  try {
+    const searchMsg = `${track.title} ${track.artist}`.trim();
+    const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(searchMsg)}&n=1&br=1`;
+    const res = await fetch(url);
+    const json = await res.json();
+    
+    if (json.code === 1 && json.data && json.data.url) {
+      track.audioUrl = json.data.url;
+      track.detailsLoaded = true;
+      const q = inferQualityFromUrl(track.audioUrl);
+      track.quality = q.tag;
+      track.qualityLabel = q.label;
+      track._fullData = json.data;
+    } else {
+      track.detailsLoaded = true;
+    }
+  } catch (e) {
+    console.warn('酷我获取URL失败:', e.message);
+    track.detailsLoaded = true;
+  }
+}
 
       const d=j.data;
       Object.assign(track,{
