@@ -3913,7 +3913,7 @@ async function fetchKuwoDetails(track) {
       const res=await fetch(url);
       const j=await res.json();
       if(!j || j.code!==200 || !j.data) throw new Error('joox detail failed');
-
+}
       const d=j.data;
       const playLinks=d['播放链接']||{};
 
