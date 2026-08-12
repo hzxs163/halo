@@ -21,7 +21,22 @@ export async function onRequest(context) {
     }
 
     const kv = env.USERS_KV;
-    const userData = await kv.get(`user:${username}`);
+    
+    // 调试：检查 KV 是否存在
+    if (!kv) {
+      console.error('USERS_KV binding is undefined');
+      return new Response(JSON.stringify({ error: 'Server configuration error' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // 从 KV 读取用户数据
+    const userKey = `user:${username}`;
+    console.log(`Looking for key: ${userKey}`);
+    
+    const userData = await kv.get(userKey);
+    console.log(`User data found: ${userData ? 'yes' : 'no'}`);
     
     if (!userData) {
       return new Response(JSON.stringify({ error: 'Invalid username or password' }), {
@@ -31,6 +46,8 @@ export async function onRequest(context) {
     }
 
     const user = JSON.parse(userData);
+    
+    // 验证密码
     if (user.password !== password) {
       return new Response(JSON.stringify({ error: 'Invalid username or password' }), {
         status: 401,
@@ -45,6 +62,7 @@ export async function onRequest(context) {
     }
     globalThis._sessions.set(sessionId, { username, createdAt: Date.now() });
 
+    // 返回成功响应，并设置 Cookie
     return new Response(JSON.stringify({ 
       username: user.username,
       sessionId 
@@ -57,7 +75,7 @@ export async function onRequest(context) {
     });
   } catch (error) {
     console.error('Login error:', error);
-    return new Response(JSON.stringify({ error: 'Login failed' }), {
+    return new Response(JSON.stringify({ error: 'Login failed: ' + error.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' }
     });
