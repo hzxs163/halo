@@ -3433,7 +3433,68 @@ async function loadAuthSession(){
       }
       return added;
     }
+// ============================================================
+// 酷我搜索
+// ============================================================
 
+async function searchKuwo(kw, limit) {
+  let added = 0;
+  
+  try {
+    const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(kw)}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    
+    if (json.code !== 1) {
+      console.warn('酷我 API 返回错误:', json.message);
+      return 0;
+    }
+    
+    let songList = [];
+    if (Array.isArray(json.data)) {
+      songList = json.data;
+    } else if (json.data && json.data.song) {
+      songList = [json.data];
+    } else {
+      return 0;
+    }
+    
+    const limitedList = songList.slice(0, limit || 10);
+    
+    limitedList.forEach((data, idx) => {
+      const uid = `kuwo-${data.rid || kw}-${idx}`;
+      if (state.trackMap.has(uid)) return;
+      
+      const track = {
+        uid,
+        source: 'kuwo',
+        displayIndex: idx + 1,
+        keyword: kw,
+        songid: data.rid || `${kw}-${idx}`,
+        title: data.song || '未知歌曲',
+        artist: data.singer || '未知歌手',
+        album: data.album || '',
+        cover: data.picture || null,
+        audioUrl: data.url || null,
+        lrc: null,
+        lrcUrl: null,
+        detailsLoaded: !!data.url,
+        quality: 'flac',
+        qualityLabel: 'FLAC',
+        _fullData: data
+      };
+      
+      state.trackMap.set(uid, track);
+      state.searchResults.push(track);
+      added++;
+    });
+    
+  } catch (e) {
+    console.error('酷我搜索失败:', e);
+  }
+  
+  return added;
+}
     async function searchAllSources(reset){
       if(!state.searchKeyword){showToast(t('toastNeedKeyword'));return;}
       const enabled=Object.keys(state.enabledSources).filter(k=>state.enabledSources[k]);
