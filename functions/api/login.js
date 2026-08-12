@@ -22,7 +22,6 @@ export async function onRequest(context) {
 
     const kv = env.USERS_KV;
     
-    // 调试：检查 KV 是否存在
     if (!kv) {
       console.error('USERS_KV binding is undefined');
       return new Response(JSON.stringify({ error: 'Server configuration error' }), {
@@ -31,12 +30,8 @@ export async function onRequest(context) {
       });
     }
 
-    // 从 KV 读取用户数据
     const userKey = `user:${username}`;
-    console.log(`Looking for key: ${userKey}`);
-    
     const userData = await kv.get(userKey);
-    console.log(`User data found: ${userData ? 'yes' : 'no'}`);
     
     if (!userData) {
       return new Response(JSON.stringify({ error: 'Invalid username or password' }), {
@@ -47,7 +42,6 @@ export async function onRequest(context) {
 
     const user = JSON.parse(userData);
     
-    // 验证密码
     if (user.password !== password) {
       return new Response(JSON.stringify({ error: 'Invalid username or password' }), {
         status: 401,
@@ -62,7 +56,16 @@ export async function onRequest(context) {
     }
     globalThis._sessions.set(sessionId, { username, createdAt: Date.now() });
 
-    // 返回成功响应，并设置 Cookie
+    // 设置 Cookie - 添加 Secure 标志
+    const cookieOptions = [
+      `session=${sessionId}`,
+      'Path=/',
+      'HttpOnly',
+      'SameSite=Lax',
+      'Max-Age=604800',
+      'Secure'
+    ].join('; ');
+
     return new Response(JSON.stringify({ 
       username: user.username,
       sessionId 
@@ -70,7 +73,7 @@ export async function onRequest(context) {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Set-Cookie': `session=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`
+        'Set-Cookie': cookieOptions
       }
     });
   } catch (error) {
