@@ -56,13 +56,13 @@ export async function onRequest(context) {
     }
     globalThis._sessions.set(sessionId, { username, createdAt: Date.now() });
 
-    // 设置 Cookie - 添加 Secure 标志
+    // 设置 Cookie - 完整配置
     const cookieOptions = [
       `session=${sessionId}`,
       'Path=/',
       'HttpOnly',
       'SameSite=Lax',
-      'Max-Age=604800',
+      'Max-Age=604800',  // 7天
       'Secure'
     ].join('; ');
 
@@ -73,7 +73,8 @@ export async function onRequest(context) {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Set-Cookie': cookieOptions
+        'Set-Cookie': cookieOptions,
+        'Cache-Control': 'no-store, no-cache, must-revalidate'
       }
     });
   } catch (error) {
