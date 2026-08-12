@@ -7,9 +7,10 @@ export async function onRequest(context) {
     return new Response(null, {
       status: 204,
       headers: {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': 'https://halo-d8b.pages.dev',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, Cookie',
+        'Access-Control-Allow-Credentials': 'true',
         'Access-Control-Max-Age': '86400',
       }
     });
@@ -19,9 +20,10 @@ export async function onRequest(context) {
     const response = await next();
     // 给所有响应添加 CORS 头
     const headers = new Headers(response.headers);
-    headers.set('Access-Control-Allow-Origin', '*');
+    headers.set('Access-Control-Allow-Origin', 'https://halo-d8b.pages.dev');
     headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie');
+    headers.set('Access-Control-Allow-Credentials', 'true');
     
     return new Response(response.body, {
       status: response.status,
@@ -34,7 +36,8 @@ export async function onRequest(context) {
       status: 500,
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': 'https://halo-d8b.pages.dev',
+        'Access-Control-Allow-Credentials': 'true'
       }
     });
   }
