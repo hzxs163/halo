@@ -3388,469 +3388,9 @@ async function loadAuthSession(){
     }
 
 // ============================================================
-// 新版酷我音乐搜索 - 多源自动回退
+// 酷我获取播放链接
 // ============================================================
 
-// 酷我 API 列表（按优先级排序）
-const KUWO_API_LIST = [
-  // 源1：溯音酷我 API（不需要代理，直接调用）
-  {
-    name: '溯音酷我',
-    url: 'https://oiapi.net/api/Kuwo',
-    search: async (keyword, limit) => {
-      const res = await fetch(`${KUWO_API_LIST[0].url}?msg=${encodeURIComponent(keyword)}&n=${limit || 10}&br=1`);
-      const data = await res.json();
-      if (data?.data?.list && Array.isArray(data.data.list)) {
-        return data.data.list.map((item, idx) => ({
-          rid: item.id || item.rid || `${keyword}-${idx}`,
-          name: item.name || item.title || '',
-          artist: item.artist || item.singer || '',
-          album: item.album || '',
-          pic: item.pic || item.cover || ''
-        }));
-      }
-      // 尝试从 message 中解析
-      if (data?.message) {
-        const match = String(data.message).match(/歌曲信息[：:]\s*(.+?)\s*[-–]\s*(.+)/);
-        if (match) {
-          return [{
-            rid: keyword + '-0',
-            name: match[1].trim(),
-            artist: match[2].trim(),
-            album: '',
-            pic: ''
-          }];
-        }
-      }
-      return [];
-    },
-    getUrl: async (songId, songName, artist) => {
-      // 用歌名+歌手搜索获取播放链接
-      const keyword = songName && artist ? `${songName} ${artist}` : songName || songId;
-      const res = await fetch(`${KUWO_API_LIST[0].url}?msg=${encodeURIComponent(keyword)}&n=1&br=1`);
-      const data = await res.json();
-      if (data?.data?.url) return data.data.url;
-      if (data?.message) {
-        const match = String(data.message).match(/音乐链接[：:](\S+)/);
-        if (match) return match[1];
-      }
-      return null;
-    }
-  },
-  // 源2：通过您的代理调用星海 API
-  {
-    name: '星海酷我',
-    url: '/api/proxy/xinghai',
-    search: async (keyword, limit) => {
-      const res = await fetch(`/api/proxy/xinghai?source=kuwo&keyword=${encodeURIComponent(keyword)}&limit=${limit || 10}`);
-      const data = await res.json();
-      if (data?.list && Array.isArray(data.list)) {
-        return data.list.map((item, idx) => ({
-          rid: item.id || item.songid || `${keyword}-${idx}`,
-          name: item.name || item.title || '',
-          artist: item.artist || item.singer || '',
-          album: item.album || '',
-          pic: item.pic || item.cover || ''
-        }));
-      }
-      return [];
-    },
-    getUrl: async (songId) => {
-      const res = await fetch(`/api/proxy/xinghai?source=kuwo&id=${encodeURIComponent(songId)}&type=url`);
-      const data = await res.json();
-      return data?.url || null;
-    }
-  }
-];
-
-// ============================================================
-// 酷我搜索 - 支持列表和单曲两种返回格式
-// ============================================================
-
-async function searchKuwo(kw, limit) {
-  let added = 0;
-  
-  try {
-    // 请求时指定返回数量，让接口返回数组
-    const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(kw)}`;
-    const res = await fetch(url);
-    const json = await res.json();
-    
-    if (json.code !== 1) {
-      console.warn('酷我 API 返回错误:', json.message);
-      return 0;
-    }
-    
-    // 关键修复：判断 data 是数组还是对象
-    let songList = [];
-    if (Array.isArray(json.data)) {
-      // 情况1：返回的是数组（多个结果）
-      songList = json.data;
-    } else if (json.data && json.data.song) {
-      // 情况2：返回的是单个对象（1个结果），包装成数组
-      songList = [json.data];
-    } else {
-      return 0;
-    }
-    
-    // 遍历歌曲列表
-    songList.forEach((data, idx) => {
-      const uid = `kuwo-${data.rid || kw}-${idx}`;
-      if (state.trackMap.has(uid)) return;
-      
-      // 提取最高音质（flac > 320k > 128k）
-      let bestQuality = '128k';
-      let bestUrl = null;
-      if (data.types && Array.isArray(data.types)) {
-        // 按码率从高到低排序
-        const sorted = [...data.types].sort((a, b) => {
-          const aVal = parseInt(a.bitrate) || 0;
-          const bVal = parseInt(b.bitrate) || 0;
-          return bVal - aVal;
-        });
-        if (sorted.length > 0) {
-          bestQuality = sorted[0].bitrate + 'k';
-          // 注意：types 里没有 url，url 在 data.url 中
-        }
-      }
-      
-      const track = {
-        uid,
-        source: 'kuwo',
-        displayIndex: idx + 1,
-        keyword: kw,
-        songid: data.rid || `${kw}-${idx}`,
-        title: data.song || '未知歌曲',
-        artist: data.singer || '未知歌手',
-        album: data.album || '',
-        cover: data.picture || null,
-        audioUrl: data.url || null,  // 列表接口也可能直接返回 url
-        lrc: null,
-        lrcUrl: null,
-        detailsLoaded: !!data.url,  // 如果有 url 则标记为已加载
-        quality: 'flac',
-        qualityLabel: 'FLAC',
-        _fullData: data
-      };
-      
-      state.trackMap.set(uid, track);
-      state.searchResults.push(track);
-      added++;
-    });
-    
-  } catch (e) {
-    console.error('酷我搜索失败:', e);
-  }
-  
-  return added;
-}
-
-// ============================================================
-// 酷我获取播放链接（保持不变，但增加对列表数据的支持）
-// ============================================================
-
-async function fetchKuwoDetails(track) {
-  if (track.audioUrl) {
-    track.detailsLoaded = true;
-    return;
-  }
-  
-  if (track._fullData && track._fullData.url) {
-    track.audioUrl = track._fullData.url;
-    track.detailsLoaded = true;
-    const q = inferQualityFromUrl(track.audioUrl);
-    track.quality = q.tag;
-    track.qualityLabel = q.label;
-    return;
-  }
-  
-  // 如果 _fullData 中没有 url，尝试用 rid 重新请求单曲
-  try {
-    const rid = track.songid;
-    if (rid) {
-      // 请求单曲详情，此时 n=1 返回单个对象
-      const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(rid)}&n=1&br=1`;
-      const res = await fetch(url);
-      const json = await res.json();
-      if (json.code === 1 && json.data && json.data.url) {
-        track.audioUrl = json.data.url;
-        track.detailsLoaded = true;
-        const q = inferQualityFromUrl(track.audioUrl);
-        track.quality = q.tag;
-        track.qualityLabel = q.label;
-        track._fullData = json.data;
-        return;
-      }
-    }
-    
-    // 备用方案：用歌名+歌手搜索
-    const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(track.title + ' ' + track.artist)}&n=1&br=1`;
-    const res = await fetch(url);
-    const json = await res.json();
-    if (json.code === 1 && json.data && json.data.url) {
-      track.audioUrl = json.data.url;
-      track.detailsLoaded = true;
-      const q = inferQualityFromUrl(track.audioUrl);
-      track.quality = q.tag;
-      track.qualityLabel = q.label;
-      track._fullData = json.data;
-    } else {
-      throw new Error('无法获取播放链接');
-    }
-  } catch (e) {
-    console.warn('酷我获取URL失败:', e.message);
-    track.detailsLoaded = true;
-  }
-}
-
-    const JOOX_TOKEN = 'f84ao9lMF_q7husBWRfgUw';
-    const JOOX_BR = 4;
-
-    async function searchJoox(kw, limit){
-      const url=`https://apicx.asia/api/joox_music?msg=${encodeURIComponent(kw)}&token=${encodeURIComponent(JOOX_TOKEN)}&br=${encodeURIComponent(JOOX_BR)}`;
-      let added=0;
-      try{
-        const res=await fetch(url);
-        const json=await res.json();
-        const songs=json && json.code===200 && json.data && Array.isArray(json.data.songs) ? json.data.songs : [];
-        songs.slice(0, limit || songs.length).forEach((it, idx)=>{
-          const songMid=it.songmid || '';
-          const songId=it['歌曲ID'] || songMid || (idx+1);
-          const uid=`joox-${songMid || songId}`;
-          if(state.trackMap.has(uid))return;
-
-          const track={
-            uid,
-            source:'joox',
-            displayIndex:idx+1,
-            keyword:kw,
-            jooxIndex:idx+1,
-            songid:songId,
-            songMid:songMid,
-
-            title:it['歌曲名称']||'',
-            artist:it['歌手']||'',
-            album:it['专辑']||'',
-
-            cover:null,
-            audioUrl:null,
-            lrc:it['歌词内容']||null,
-            lrcUrl:null,
-            detailsLoaded:false,
-            quality:null,
-            qualityLabel:null
-          };
-
-          state.trackMap.set(uid,track);
-          state.searchResults.push(track);
-          added++;
-        });
-      }catch(e){
-        console.error('joox search',e);
-      }
-      return added;
-    }
-
-    async function searchAllSources(reset){
-      if(!state.searchKeyword){showToast(t('toastNeedKeyword'));return;}
-      const enabled=Object.keys(state.enabledSources).filter(k=>state.enabledSources[k]);
-      if(!enabled.length){showToast(t('searchStatusNoSource'));return;}
-      state.searchInProgress=true;
-      dom.searchStatus.textContent=t('searchStatusSearching');
-
-      if(reset){
-        Object.keys(state.perSourceCurrentLimit)
-          .forEach(k=>state.perSourceCurrentLimit[k]=state.perSourceLimit);
-        Object.keys(state.perSourcePage).forEach(k=>state.perSourcePage[k]=1);
-
-        state.searchResults=[];
-        state.trackMap.clear();
-        state.noMoreResults=false;
-      }
-
-      const kw=state.searchKeyword;
-      const tasks=[];
-      for(const s of enabled){
-        const limit=state.perSourceCurrentLimit[s]||state.perSourceLimit;
-        if(s==='netease')tasks.push(searchNetease(kw, state.perSourcePage.netease || 1, state.perSourceLimit));
-        if(s==='qq')tasks.push(searchQQ(kw,limit));
-        if(s==='kuwo')tasks.push(searchKuwo(kw,limit));
-        if(s==='joox')tasks.push(searchJoox(kw,limit));
-      }
-      let added=0;
-      try{
-        const res=await Promise.all(tasks);
-        added=res.reduce((a,b)=>a+(b||0),0);
-      }catch(e){
-        console.error(e);
-        showToast(t('toastSearchError'));
-      }
-
-      state.searchInProgress=false;
-      dom.searchStatus.textContent=t('searchStatusDone');
-      dom.searchCount.textContent=state.searchResults.length.toString();
-      renderMiniSearchList();
-      renderPlaylistList();
-      if(state.isAuthenticated&&!state.currentTrack && state.searchResults.length){
-        playFromList('results',0);
-      }
-      if(!reset){
-        if(added===0){state.noMoreResults=true;showToast(t('toastNoMore'));}
-        else state.noMoreResults=false;
-      }
-    }
-
-    async function fetchNeteaseDetails(track){
-      if(track.songid){
-        if(!track.audioUrl){
-          track.audioUrl=`https://api.qijieya.cn/meting/?server=netease&type=url&id=${encodeURIComponent(track.songid)}`;
-        }
-        if(!track.lrcUrl){
-          track.lrcUrl=`https://api.qijieya.cn/meting/?server=netease&type=lrc&id=${encodeURIComponent(track.songid)}`;
-        }
-      }
-
-      if(track.audioUrl){
-        const q=inferQualityFromUrl(track.audioUrl);
-        track.quality=q.tag;
-        track.qualityLabel=q.label;
-      }
-
-      if(!track.lrc && track.lrcUrl){
-        try{
-          const lr=await fetch(track.lrcUrl);
-          const contentType=(lr.headers.get('content-type')||'').toLowerCase();
-          if(contentType.includes('json')){
-            const lj=await lr.json();
-            track.lrc =
-              (typeof lj === 'string' ? lj : null) ||
-              lj?.lrc ||
-              lj?.lyric ||
-              lj?.data?.lrc ||
-              lj?.data?.lyric ||
-              (typeof lj?.data === 'string' ? lj.data : null) ||
-              track.lrc ||
-              null;
-          }else{
-            track.lrc=await lr.text();
-          }
-        }catch(e){
-          console.warn('netease(qijieya meting) lyric fetch failed', e);
-        }
-      }
-
-      track.detailsLoaded=true;
-    }
-
-    async function fetchQQDetails(track) {
-    const msg =
-        (track.qqSearchKey || track.keyword || '').trim() ||
-        ((track.title || '') + ' ' + (track.artist || '')).trim();
-
-    const mid =
-        (track.qqId || track.songMid || track.songid || '').toString().trim();
-
-    if (!mid) return;
-
-    const url =
-        `https://tang.api.s01s.cn/music_open_api.php` +
-        `?msg=${encodeURIComponent(msg)}` +
-        `&type=json` +
-        `&mid=${encodeURIComponent(mid)}`;
-
-    function pickBestPlayUrl(d) {
-        if (d.song_play_url_sq) return { url: d.song_play_url_sq, tag: 'lossless', label: 'LOSSLESS', text: `SQ ${d.kbps_sq || ''}`.trim() };
-        if (d.song_play_url_pq) return { url: d.song_play_url_pq, tag: 'lossless', label: 'LOSSLESS', text: `PQ ${d.kbps_pq || ''}`.trim() };
-
-        if (d.song_play_url_accom) return { url: d.song_play_url_accom, tag: 'hq', label: 'HQ', text: `ACCOM ${d.kbps_accom || ''}`.trim() };
-        if (d.song_play_url_hq) return { url: d.song_play_url_hq, tag: 'hq', label: 'HQ', text: `HQ ${d.kbps_hq || ''}`.trim() };
-
-        if (d.song_play_url_standard) return { url: d.song_play_url_standard, tag: 'standard', label: 'STD', text: `STD ${d.kbps_standard || ''}`.trim() };
-        if (d.song_play_url_fq) return { url: d.song_play_url_fq, tag: 'low', label: 'LOW', text: `FQ ${d.kbps_fq || ''}`.trim() };
-
-        if (d.song_play_url) return { url: d.song_play_url, tag: null, label: null, text: null };
-
-        return { url: null, tag: null, label: null, text: null };
-    }
-
-    try {
-        const res = await fetch(url);
-        const d = await res.json();
-
-        if (!d || typeof d !== 'object' || !d.song_mid) {
-        throw new Error('qq detail error (invalid response)');
-        }
-
-        track.title   = d.song_title || d.song_name || track.title;
-        track.artist  = d.singer_name || track.artist;
-        track.album   = d.album_name || d.album_title || track.album || '';
-        track.cover   = d.album_pic || d.singer_pic || track.cover;
-        track.pageUrl = d.song_h5_url || track.pageUrl;
-
-        const best = pickBestPlayUrl(d);
-        track.audioUrl = best.url || track.audioUrl;
-
-        track.lrc = d.song_lyric || d.lyric || track.lrc;
-
-        track.qqQualityText =
-        best.text ||
-        (d.vip ? `VIP:${d.vip}` : null) ||
-        track.qqQualityText;
-
-        if (best.tag && best.label) {
-        track.quality = best.tag;
-        track.qualityLabel = best.label;
-        }
-
-        if (track.audioUrl) {
-        const q = inferQualityFromUrl(track.audioUrl);
-        if (q && q.label) {
-            track.quality = q.tag;
-            track.qualityLabel = q.label;
-        }
-        }
-
-        track.detailsLoaded = true;
-    } catch (e) {
-        console.error('qq detail (tang)', e);
-    }
-    }
-
-    function normalizeMusicMatchText(value){
-      return String(value||'').toLowerCase().replace(/[\s\-—_·•()（）【】\[\]《》'".,，。:：;；!?！？]/g,'');
-    }
-
-    function scoreQQImportCandidate(track,candidate){
-      const targetTitle=normalizeMusicMatchText(track.title);
-      const targetArtist=normalizeMusicMatchText(track.artist);
-      const title=normalizeMusicMatchText(candidate.song_title||candidate.song_name);
-      const artist=normalizeMusicMatchText(candidate.singer_name);
-      let score=0;
-      if(title===targetTitle)score+=100;
-      else if(title&&targetTitle&&(title.includes(targetTitle)||targetTitle.includes(title)))score+=45;
-      if(artist===targetArtist)score+=50;
-      else if(artist&&targetArtist&&(artist.includes(targetArtist)||targetArtist.includes(artist)))score+=24;
-      return score;
-    }
-
-    async function fetchQishuiDetails(track){
-      if(!track.qqId){
-        const keyword=(track.keyword||`${track.title||''} ${track.artist||''}`).trim();
-        const response=await fetch(`https://tang.api.s01s.cn/music_open_api.php?msg=${encodeURIComponent(keyword)}&type=json`);
-        const json=await response.json();
-        const candidates=Array.isArray(json)?json:(Array.isArray(json?.data)?json.data:[]);
-        const matched=candidates
-          .filter(item=>item&&item.song_mid)
-          .map(item=>({item,score:scoreQQImportCandidate(track,item)}))
-          .sort((a,b)=>b.score-a.score)[0];
-        if(!matched||matched.score<45)throw new Error('qishui track match failed');
-        track.qqId=matched.item.song_mid;
-        track.songMid=matched.item.song_mid;
-        track.qqSearchKey=keyword;
-      }
-      await fetchQQDetails(track);
-    }
-;
 async function fetchKuwoDetails(track) {
   if (track.audioUrl) {
     track.detailsLoaded = true;
@@ -3888,104 +3428,83 @@ async function fetchKuwoDetails(track) {
   }
 }
 
-      const d=j.data;
-      Object.assign(track,{
-        title:d.name || track.title,
-        artist:d.artist || track.artist,
-        album:d.album || track.album,
-        cover:d.pic || track.cover,
-        audioUrl:d.url || track.audioUrl,
-        lrc: d.lyric || track.lrc || null,
-        lrcUrl: null,
-        detailsLoaded:true
-      });
+// ============================================================
+// JOOX 获取播放链接
+// ============================================================
 
-      if (track.audioUrl) {
-        const q = inferQualityFromUrl(track.audioUrl);
-        track.quality = q.tag;
-        track.qualityLabel = q.label;
-      }
+async function fetchJooxDetails(track) {
+  const n = track.jooxIndex || track.displayIndex || 1;
+  const url = `https://apicx.asia/api/joox_music?msg=${encodeURIComponent(track.keyword)}&n=${encodeURIComponent(n)}&token=${encodeURIComponent(JOOX_TOKEN)}&br=${encodeURIComponent(JOOX_BR)}`;
+  const res = await fetch(url);
+  const j = await res.json();
+  if (!j || j.code !== 200 || !j.data) throw new Error('joox detail failed');
+
+  const d = j.data;
+  const playLinks = d['播放链接'] || {};
+
+  async function probeJooxAudioUrl(u) {
+    if (!u) return false;
+    try {
+      const res = await fetch(u, { method: 'HEAD', cache: 'no-store' });
+      return res.ok || res.status === 206;
+    } catch (e) {
+      return false;
     }
+  }
 
-    async function fetchJooxDetails(track) {
-      const n = track.jooxIndex || track.displayIndex || 1;
-      const url = `https://apicx.asia/api/joox_music?msg=${encodeURIComponent(track.keyword)}&n=${encodeURIComponent(n)}&token=${encodeURIComponent(JOOX_TOKEN)}&br=${encodeURIComponent(JOOX_BR)}`;
-      const res = await fetch(url);
-      const j = await res.json();
-      if (!j || j.code !== 200 || !j.data) throw new Error('joox detail failed');
-
-      const d = j.data;
-      const playLinks = d['播放链接'] || {};
-
-      async function probeJooxAudioUrl(u) {
-        if (!u) return false;
-
-        async function request(method, extraOptions) {
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 3000);
-          try {
-            const res = await fetch(u, Object.assign({
-              method,
-              cache: 'no-store',
-              redirect: 'follow',
-              signal: controller.signal
-            }, extraOptions || {}));
-            return res && (res.ok || res.status === 206 || (res.status >= 200 && res.status < 400));
-          } finally {
-            clearTimeout(timer);
-          }
-        }
-
-        try {
-          if (await request('HEAD')) return true;
-        } catch (e) {}
-
-        try {
-          return await request('GET', { headers: { Range: 'bytes=0-0' } });
-        } catch (e) {
-          return false;
-        }
+  async function pickJooxPlayUrl(links) {
+    const order = ['Atmos全景声', '无损FLAC', 'Hi-Res无损', '母带无损', 'OGG 320', 'MP3 320', 'AAC 192', 'OGG 192', 'MP3 128', 'AAC 96', 'AAC 48'];
+    for (const name of order) {
+      const u = links[name];
+      if (!u) continue;
+      if (!(await probeJooxAudioUrl(u))) continue;
+      if (/母带|无损|flac|hi-res|atmos/i.test(name) || /\.flac(?:\?|$)/i.test(u)) {
+        return { url: u, tag: 'lossless', label: 'LOSSLESS', text: name };
       }
-
-      async function pickJooxPlayUrl(links) {
-        const order = ['Atmos全景声', '无损FLAC', 'Hi-Res无损', '母带无损', 'OGG 320', 'MP3 320', 'AAC 192', 'OGG 192', 'MP3 128', 'AAC 96', 'AAC 48'];
-        for (const name of order) {
-          const u = links[name];
-          if (!u) continue;
-          if (!(await probeJooxAudioUrl(u))) continue;
-          if (/母带|无损|flac|hi-res|atmos/i.test(name) || /\.flac(?:\?|$)/i.test(u)) {
-            return { url: u, tag: 'lossless', label: 'LOSSLESS', text: name };
-          }
-          const m = name.match(/(\d+)$/);
-          if (m) return { url: u, tag: m[1] + 'k', label: m[1] + 'K', text: name };
-          return { url: u, tag: null, label: null, text: name };
-        }
-        return { url: null, tag: null, label: null, text: null };
-      }
-
-      const best = await pickJooxPlayUrl(playLinks);
-      Object.assign(track, {
-        title: d['歌曲名称'] || track.title,
-        artist: d['歌手'] || track.artist,
-        album: d['专辑'] || track.album,
-        songid: d['歌曲ID'] || track.songid,
-        songMid: d.songmid || track.songMid,
-        audioUrl: best.url || track.audioUrl,
-        lrc: d['歌词内容'] || track.lrc || null,
-        lrcUrl: null,
-        jooxQualityText: best.text || track.jooxQualityText || null,
-        detailsLoaded: true
-      });
-
-      if (best.tag && best.label) {
-        track.quality = best.tag;
-        track.qualityLabel = best.label;
-      } else if (track.audioUrl) {
-        const q = inferQualityFromUrl(track.audioUrl);
-        track.quality = q.tag;
-        track.qualityLabel = q.label;
-      }
+      const m = name.match(/(\d+)$/);
+      if (m) return { url: u, tag: m[1] + 'k', label: m[1] + 'K', text: name };
+      return { url: u, tag: null, label: null, text: name };
     }
+    return { url: null, tag: null, label: null, text: null };
+  }
+
+  const best = await pickJooxPlayUrl(playLinks);
+  Object.assign(track, {
+    title: d['歌曲名称'] || track.title,
+    artist: d['歌手'] || track.artist,
+    album: d['专辑'] || track.album,
+    songid: d['歌曲ID'] || track.songid,
+    songMid: d.songmid || track.songMid,
+    audioUrl: best.url || track.audioUrl,
+    lrc: d['歌词内容'] || track.lrc || null,
+    lrcUrl: null,
+    jooxQualityText: best.text || track.jooxQualityText || null,
+    detailsLoaded: true
+  });
+
+  if (best.tag && best.label) {
+    track.quality = best.tag;
+    track.qualityLabel = best.label;
+  } else if (track.audioUrl) {
+    const q = inferQualityFromUrl(track.audioUrl);
+    track.quality = q.tag;
+    track.qualityLabel = q.label;
+  }
+}
+
+// ============================================================
+// 确保歌曲详情加载
+// ============================================================
+
+async function ensureTrackDetails(track, options = {}) {
+  if (track.detailsLoaded && track.audioUrl && (track.lrc || !track.lrcUrl)) return;
+  if (!options.silent) dom.playerStatus.textContent = t('playerStatusLoading');
+  if (track.source === 'netease') await fetchNeteaseDetails(track);
+  else if (track.source === 'qishui') await fetchQishuiDetails(track);
+  else if (track.source === 'kuwo') await fetchKuwoDetails(track);
+  else if (track.source === 'joox') await fetchJooxDetails(track);
+  else await fetchQQDetails(track);
+}
 
     async function ensureTrackDetails(track, options = {}) {
       if (track.detailsLoaded && track.audioUrl && (track.lrc || !track.lrcUrl)) return;
