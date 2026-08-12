@@ -3472,7 +3472,7 @@ async function searchKuwo(kw, limit) {
   
   try {
     // 请求时指定返回数量，让接口返回数组
-    const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(kw)}&n=${limit || 10}&br=1`;
+    const url = `https://oiapi.net/api/Kuwo?msg=${encodeURIComponent(kw)}`;
     const res = await fetch(url);
     const json = await res.json();
     
