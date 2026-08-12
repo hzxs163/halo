@@ -3907,85 +3907,94 @@ async function fetchKuwoDetails(track) {
       }
     }
 
-    async function fetchJooxDetails(track){
-      const n=track.jooxIndex || track.displayIndex || 1;
-      const url=`https://apicx.asia/api/joox_music?msg=${encodeURIComponent(track.keyword)}&n=${encodeURIComponent(n)}&token=${encodeURIComponent(JOOX_TOKEN)}&br=${encodeURIComponent(JOOX_BR)}`;
-      const res=await fetch(url);
-      const j=await res.json();
-      if(!j || j.code!==200 || !j.data) throw new Error('joox detail failed');
-}
-      const d=j.data;
-      const playLinks=d['播放链接']||{};
+    async function fetchJooxDetails(track) {
+      const n = track.jooxIndex || track.displayIndex || 1;
+      const url = `https://apicx.asia/api/joox_music?msg=${encodeURIComponent(track.keyword)}&n=${encodeURIComponent(n)}&token=${encodeURIComponent(JOOX_TOKEN)}&br=${encodeURIComponent(JOOX_BR)}`;
+      const res = await fetch(url);
+      const j = await res.json();
+      if (!j || j.code !== 200 || !j.data) throw new Error('joox detail failed');
 
-      async function probeJooxAudioUrl(u){
-        if(!u) return false;
+      const d = j.data;
+      const playLinks = d['播放链接'] || {};
 
-        async function request(method, extraOptions){
-          const controller=new AbortController();
-          const timer=setTimeout(()=>controller.abort(),3000);
-          try{
-            const res=await fetch(u,Object.assign({
+      async function probeJooxAudioUrl(u) {
+        if (!u) return false;
+
+        async function request(method, extraOptions) {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 3000);
+          try {
+            const res = await fetch(u, Object.assign({
               method,
-              cache:'no-store',
-              redirect:'follow',
-              signal:controller.signal
-            },extraOptions||{}));
-            return res && (res.ok || res.status===206 || (res.status>=200 && res.status<400));
-          }finally{
+              cache: 'no-store',
+              redirect: 'follow',
+              signal: controller.signal
+            }, extraOptions || {}));
+            return res && (res.ok || res.status === 206 || (res.status >= 200 && res.status < 400));
+          } finally {
             clearTimeout(timer);
           }
         }
 
-        try{
-          if(await request('HEAD')) return true;
-        }catch(e){
-        }
+        try {
+          if (await request('HEAD')) return true;
+        } catch (e) {}
 
-        try{
-          return await request('GET',{headers:{Range:'bytes=0-0'}});
-        }catch(e){
+        try {
+          return await request('GET', { headers: { Range: 'bytes=0-0' } });
+        } catch (e) {
           return false;
         }
       }
 
-      async function pickJooxPlayUrl(links){
-        const order=['Atmos全景声','无损FLAC','Hi-Res无损','母带无损','OGG 320','MP3 320','AAC 192','OGG 192','MP3 128','AAC 96','AAC 48'];
-        for(const name of order){
-          const u=links[name];
-          if(!u)continue;
-          if(!(await probeJooxAudioUrl(u)))continue;
-          if(/母带|无损|flac|hi-res|atmos/i.test(name) || /\.flac(?:\?|$)/i.test(u)){
-            return {url:u, tag:'lossless', label:'LOSSLESS', text:name};
+      async function pickJooxPlayUrl(links) {
+        const order = ['Atmos全景声', '无损FLAC', 'Hi-Res无损', '母带无损', 'OGG 320', 'MP3 320', 'AAC 192', 'OGG 192', 'MP3 128', 'AAC 96', 'AAC 48'];
+        for (const name of order) {
+          const u = links[name];
+          if (!u) continue;
+          if (!(await probeJooxAudioUrl(u))) continue;
+          if (/母带|无损|flac|hi-res|atmos/i.test(name) || /\.flac(?:\?|$)/i.test(u)) {
+            return { url: u, tag: 'lossless', label: 'LOSSLESS', text: name };
           }
-          const m=name.match(/(\d+)$/);
-          if(m)return {url:u, tag:m[1]+'k', label:m[1]+'K', text:name};
-          return {url:u, tag:null, label:null, text:name};
+          const m = name.match(/(\d+)$/);
+          if (m) return { url: u, tag: m[1] + 'k', label: m[1] + 'K', text: name };
+          return { url: u, tag: null, label: null, text: name };
         }
-        return {url:null, tag:null, label:null, text:null};
+        return { url: null, tag: null, label: null, text: null };
       }
 
-      const best=await pickJooxPlayUrl(playLinks);
-      Object.assign(track,{
-        title:d['歌曲名称']||track.title,
-        artist:d['歌手']||track.artist,
-        album:d['专辑']||track.album,
-        songid:d['歌曲ID']||track.songid,
-        songMid:d.songmid||track.songMid,
-        audioUrl:best.url||track.audioUrl,
-        lrc:d['歌词内容']||track.lrc||null,
-        lrcUrl:null,
-        jooxQualityText:best.text||track.jooxQualityText||null,
-        detailsLoaded:true
+      const best = await pickJooxPlayUrl(playLinks);
+      Object.assign(track, {
+        title: d['歌曲名称'] || track.title,
+        artist: d['歌手'] || track.artist,
+        album: d['专辑'] || track.album,
+        songid: d['歌曲ID'] || track.songid,
+        songMid: d.songmid || track.songMid,
+        audioUrl: best.url || track.audioUrl,
+        lrc: d['歌词内容'] || track.lrc || null,
+        lrcUrl: null,
+        jooxQualityText: best.text || track.jooxQualityText || null,
+        detailsLoaded: true
       });
 
-      if(best.tag && best.label){
-        track.quality=best.tag;
-        track.qualityLabel=best.label;
-      }else if(track.audioUrl){
-        const q=inferQualityFromUrl(track.audioUrl);
-        track.quality=q.tag;
-        track.qualityLabel=q.label;
+      if (best.tag && best.label) {
+        track.quality = best.tag;
+        track.qualityLabel = best.label;
+      } else if (track.audioUrl) {
+        const q = inferQualityFromUrl(track.audioUrl);
+        track.quality = q.tag;
+        track.qualityLabel = q.label;
       }
+    }
+
+    async function ensureTrackDetails(track, options = {}) {
+      if (track.detailsLoaded && track.audioUrl && (track.lrc || !track.lrcUrl)) return;
+      if (!options.silent) dom.playerStatus.textContent = t('playerStatusLoading');
+      if (track.source === 'netease') await fetchNeteaseDetails(track);
+      else if (track.source === 'qishui') await fetchQishuiDetails(track);
+      else if (track.source === 'kuwo') await fetchKuwoDetails(track);
+      else if (track.source === 'joox') await fetchJooxDetails(track);
+      else await fetchQQDetails(track);
     }
 
     async function ensureTrackDetails(track, options={}){
