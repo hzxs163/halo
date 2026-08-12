@@ -2903,7 +2903,7 @@ async function loadAuthSession(){
       const legacySnapshot=hasAccountCache ? null : readLibrarySnapshotFromStorage(LIBRARY_STORAGE_KEY);
 
       try{
-        const response=await fetch('/api/library',{credentials:'same-origin'});
+        const response=await fetch('/api/library',{credentials:'include'});
         if(!response.ok)throw new Error(`library load failed (${response.status})`);
         const data=await response.json();
         if(!state.isAuthenticated || state.profileName!==username)return;
