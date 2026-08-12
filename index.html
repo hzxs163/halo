@@ -3387,47 +3387,54 @@ async function loadAuthSession(){
     return added;
     }
 
-    async function searchKuwo(kw, limit){
-      const url=`https://kw-api.cenguigui.cn/?name=${encodeURIComponent(kw)}&page=1&limit=${encodeURIComponent(limit)}`;
-      let added=0;
-      try{
-        const res=await fetch(url);
-        const json=await res.json();
-        if(json.code!==200 || !Array.isArray(json.data)) return 0;
+async function searchKuwo(kw, limit){
+  // 改为调用您自己的代理接口
+  const url = `/api/proxy/kuwo?name=${encodeURIComponent(kw)}&page=1&limit=${encodeURIComponent(limit)}`;
+  let added = 0;
+  
+  try{
+    const res = await fetch(url);
+    const json = await res.json();
+    
+    // 兼容代理返回的格式
+    if (!json || typeof json !== 'object') return 0;
+    
+    // 检查数据是否存在
+    const data = Array.isArray(json.data) ? json.data : [];
+    if (json.code !== 200 || !data.length) return 0;
 
-        json.data.forEach((it, idx)=>{
-          const uid=`kuwo-${it.rid}`;
-          if(state.trackMap.has(uid))return;
+    data.forEach((it, idx) => {
+      const uid = `kuwo-${it.rid}`;
+      if (state.trackMap.has(uid)) return;
 
-          const track={
-            uid,
-            source:'kuwo',
-            displayIndex:idx+1,
-            keyword:kw,
-            songid:it.rid,
+      const track = {
+        uid,
+        source: 'kuwo',
+        displayIndex: idx + 1,
+        keyword: kw,
+        songid: it.rid,
+        title: it.name || '',
+        artist: it.artist || '',
+        album: it.album || '',
+        cover: it.pic || null,
+        audioUrl: null,
+        lrc: null,
+        lrcUrl: null,
+        detailsLoaded: false,
+        quality: null,
+        qualityLabel: null
+      };
 
-            title:it.name||'',
-            artist:it.artist||'',
-            album:it.album||'',
+      state.trackMap.set(uid, track);
+      state.searchResults.push(track);
+      added++;
+    });
 
-            cover:it.pic||null,
-            audioUrl:null,
-            lrc:null,
-            lrcUrl:null,
-            detailsLoaded:false,
-            quality:null,
-            qualityLabel:null
-          };
-
-          state.trackMap.set(uid,track);
-          state.searchResults.push(track);
-          added++;
-        });
-      }catch(e){
-        console.error('kuwo search',e);
-      }
-      return added;
-    }
+  } catch(e){
+    console.error('kuwo search via proxy', e);
+  }
+  return added;
+}
 
     const JOOX_TOKEN = 'f84ao9lMF_q7husBWRfgUw';
     const JOOX_BR = 4;
