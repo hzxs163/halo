@@ -2605,19 +2605,45 @@
       dom.loginPasswordInput.autocomplete=registerMode ? 'new-password' : 'current-password';
       dom.loginAccountInput.focus();
     }
-    async function loadAuthSession(){
-      try{
-        const response=await fetch('/api/me',{credentials:'same-origin'});
-        if(!response.ok)return;
-        const data=await response.json();
-        if(data&&data.username){
-          state.isAuthenticated=true;
-          state.profileName=data.username;
-          await loadLibraryForAuthenticatedUser();
-        }
-      }catch(e){}
-      finally{updateAuthUI();}
+async function loadAuthSession(){
+  try{
+    const response = await fetch('/api/me', { credentials: 'same-origin' });
+    
+    // 如果后端还没更新，仍然返回 401，则视为未登录
+    if (response.status === 401) {
+      state.isAuthenticated = false;
+      state.profileName = '';
+      updateAuthUI();
+      return;
     }
+    
+    if (!response.ok) return;
+    
+    const data = await response.json();
+    
+    // 适配新的响应格式：使用 isAuthenticated 字段
+    if (data && data.isAuthenticated && data.username) {
+      state.isAuthenticated = true;
+      state.profileName = data.username;
+      await loadLibraryForAuthenticatedUser();
+    } else if (data && data.username) {
+      // 兼容旧格式（如果后端还没更新）
+      state.isAuthenticated = true;
+      state.profileName = data.username;
+      await loadLibraryForAuthenticatedUser();
+    } else {
+      state.isAuthenticated = false;
+      state.profileName = '';
+    }
+  } catch(e) {
+    console.warn('Auth check failed:', e);
+    state.isAuthenticated = false;
+    state.profileName = '';
+  }
+  finally {
+    updateAuthUI();
+  }
+}
     function openLoginModal(mode='login'){
       setAuthMode(mode);
       dom.loginModal.classList.add('show');
