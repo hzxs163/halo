@@ -1,9 +1,7 @@
-// GET /api/library - 获取用户的收藏和歌单
-// PUT /api/library - 保存用户的收藏和歌单
-// 方式A：数据存在 localStorage 中，Workers 只是透传
+// GET/PUT /api/library - 用户收藏和歌单（使用 KV 存储）
 
 export async function onRequest(context) {
-  const { request } = context;
+  const { request, env } = context;
   
   // 验证用户是否登录
   const cookie = request.headers.get('Cookie') || '';
@@ -25,15 +23,13 @@ export async function onRequest(context) {
   }
 
   const username = session.username;
-  
-  // 方式A：用 globalThis 做简单缓存（冷启动会丢失，但前端有 localStorage 兜底）
-  if (!globalThis._userLibraries) {
-    globalThis._userLibraries = new Map();
-  }
+  const kv = env.USERS_KV;
+  const libraryKey = `library:${username}`;
 
   // GET: 获取用户数据
   if (request.method === 'GET') {
-    const library = globalThis._userLibraries.get(username) || {
+    const libraryData = await kv.get(libraryKey);
+    const library = libraryData ? JSON.parse(libraryData) : {
       favorites: [],
       playlists: []
     };
@@ -49,7 +45,6 @@ export async function onRequest(context) {
     try {
       const data = await request.json();
       
-      // 基本验证
       if (!data || typeof data !== 'object') {
         return new Response(JSON.stringify({ error: 'Invalid library data' }), {
           status: 400,
@@ -57,12 +52,11 @@ export async function onRequest(context) {
         });
       }
 
-      // 保存到内存（方式A 是临时的，但前端 localStorage 会持久化）
-      globalThis._userLibraries.set(username, {
+      await kv.put(libraryKey, JSON.stringify({
         favorites: Array.isArray(data.favorites) ? data.favorites : [],
         playlists: Array.isArray(data.playlists) ? data.playlists : [],
         updatedAt: Date.now()
-      });
+      }));
 
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -77,7 +71,6 @@ export async function onRequest(context) {
     }
   }
 
-  // 其他方法
   return new Response(JSON.stringify({ error: 'Method not allowed' }), {
     status: 405,
     headers: { 'Content-Type': 'application/json' }
