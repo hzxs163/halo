@@ -1,7 +1,7 @@
-// POST /api/register - 用户注册（方式A）
+// POST /api/register - 用户注册（使用 KV 存储）
 
 export async function onRequest(context) {
-  const { request } = context;
+  const { request, env } = context;
   
   if (request.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { 
@@ -34,24 +34,23 @@ export async function onRequest(context) {
       });
     }
 
-    const users = globalThis._users;
-    if (!users) {
-      globalThis._users = new Map();
-    }
-
-    if (users.has(username)) {
+    // 使用 KV 存储
+    const kv = env.USERS_KV;
+    const existing = await kv.get(`user:${username}`);
+    
+    if (existing) {
       return new Response(JSON.stringify({ error: 'Username already exists' }), {
         status: 409,
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
-    // 方式A：明文存储（仅用于演示，生产环境请用 bcrypt 或类似方案）
-    users.set(username, { 
+    // 存储用户信息（方式A：仍为演示目的，生产环境请哈希密码）
+    await kv.put(`user:${username}`, JSON.stringify({ 
       username, 
-      password,  // 方式A 简单起见，明文存储
+      password,
       createdAt: Date.now() 
-    });
+    }));
 
     return new Response(JSON.stringify({ 
       username,
