@@ -25,7 +25,7 @@ export async function onRequest(context) {
     }
 
     // 调用酷我 API（或代理服务）
-    const targetUrl = `https://kw-api.cenguigui.cn/?name=${encodeURIComponent(name)}&page=${page}&limit=${limit}`;
+    const targetUrl = `http://kw-api.cenguigui.cn/?name=${encodeURIComponent(name)}&page=${page}&limit=${limit}`;
     
     const response = await fetch(targetUrl, {
       headers: {
