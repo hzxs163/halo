@@ -3569,7 +3569,12 @@ async function fetchKuwoDetails(track) {
     const json = await res.json();
     
     if (json.code === 1 && json.data && json.data.url) {
-      track.audioUrl = json.data.url;
+      // 🔥 就改这里：强制转 HTTPS
+      let audioUrl = json.data.url;
+      if (audioUrl.startsWith('http://')) {
+        audioUrl = audioUrl.replace('http://', 'https://');
+      }
+      track.audioUrl = audioUrl;
       track.detailsLoaded = true;
       const q = inferQualityFromUrl(track.audioUrl);
       track.quality = q.tag;
